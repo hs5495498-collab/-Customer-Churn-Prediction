@@ -247,3 +247,29 @@ def test_preprocessing_fitted_on_training_data_only_not_full_dataset(feature_col
     scaler_full = StandardScaler().fit(X_full[num_cols])
 
     assert not np.allclose(scaler_train_only.mean_, scaler_full.mean_)
+
+
+# ---------------------------------------------------------------------
+# Stage 7 audit regression test: the standalone `python -m src.validation`
+# script (added in Stage 7 so a fresh clone can regenerate the gitignored
+# models/final_churn_model.joblib) must reproduce the exact Stage 5
+# documented results, since every random_state in the pipeline is fixed.
+# ---------------------------------------------------------------------
+
+def test_full_selection_pipeline_reproduces_documented_stage5_results(feature_cols, split, grid_search_result):
+    cat_cols, num_cols = feature_cols
+    X_train, X_test, y_train, y_test = split
+
+    assert grid_search_result.best_params_["classifier__C"] == 10
+    assert grid_search_result.best_score_ == pytest.approx(0.8463, abs=0.0005)
+
+    tuned_pipeline = grid_search_result.best_estimator_
+    oof_proba = get_out_of_fold_probabilities(tuned_pipeline, X_train, y_train)
+    threshold_table = evaluate_thresholds(y_train, oof_proba, [0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60])
+    selected_threshold = select_best_threshold(threshold_table, metric="f1_score")
+    assert selected_threshold == pytest.approx(0.60)
+
+    final_pipeline = tuned_pipeline  # grid_search_result.best_estimator_ is already refit on X_train
+    result = final_evaluate(final_pipeline, X_test, y_test, threshold=selected_threshold)
+    assert result["metrics"]["accuracy"] == pytest.approx(0.7622, abs=0.001)
+    assert result["metrics"]["roc_auc"] == pytest.approx(0.8409, abs=0.001)
