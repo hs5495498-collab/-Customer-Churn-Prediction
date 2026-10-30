@@ -319,3 +319,64 @@ def save_final_model(pipeline, model_path, model_name, threshold, metrics, featu
     }
     joblib.dump(artifact, model_path)
     return model_path
+
+
+if __name__ == "__main__":
+    # Standalone, reproducible regeneration of the Stage 5 final model
+    # artifact (models/final_churn_model.joblib), for a fresh clone where
+    # that gitignored file doesn't exist yet. This runs the exact same
+    # steps, in the exact same order, as notebooks/churn_analysis.ipynb
+    # Section 11 -- no different model, no shortcuts, no test-set tuning.
+    from src.preprocess import identify_feature_types
+    from src.train import (
+        load_and_clean_data, prepare_features_and_target, split_data,
+        build_model_pipeline, train_model,
+    )
+
+    DATA_PATH = "data/WA_Fn-UseC_-Telco-Customer-Churn.csv"
+    MODEL_PATH = "models/final_churn_model.joblib"
+
+    print("Loading and cleaning data...")
+    df = load_and_clean_data(DATA_PATH)
+    X, y = prepare_features_and_target(df)
+    X_train, X_test, y_train, y_test = split_data(X, y)
+    categorical_cols, numerical_cols = identify_feature_types(df)
+    cv = make_cv()
+
+    print("Tuning Logistic Regression (GridSearchCV, training data only)...")
+    grid_search = tune_logistic_regression(categorical_cols, numerical_cols, X_train, y_train, cv=cv)
+    print(f"  Best C: {grid_search.best_params_['classifier__C']}, "
+          f"best CV ROC-AUC: {grid_search.best_score_:.4f}")
+
+    print("Comparing baseline LR, tuned LR, and LDA (5-fold CV, training data only)...")
+    candidates = {
+        "logistic_regression_baseline": build_model_pipeline(categorical_cols, numerical_cols),
+        "logistic_regression_tuned": grid_search.best_estimator_,
+        "lda": build_lda_pipeline(categorical_cols, numerical_cols),
+    }
+    comparison_table = compare_models_cv(candidates, X_train, y_train, cv=cv)
+    print(comparison_table.to_string(index=False))
+
+    selected_name, selected_pipeline, reason = select_final_model(comparison_table, candidates, priority_metric="roc_auc")
+    print(f"Selected model: {selected_name}")
+
+    print("Selecting classification threshold (out-of-fold CV predictions, training data only)...")
+    oof_proba = get_out_of_fold_probabilities(selected_pipeline, X_train, y_train, cv=cv)
+    threshold_table = evaluate_thresholds(y_train, oof_proba, [0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60])
+    selected_threshold = select_best_threshold(threshold_table, metric="f1_score")
+    print(f"Selected threshold: {selected_threshold}")
+
+    print("Fitting selected model on full training set and evaluating ONCE on the held-out test set...")
+    final_pipeline = train_model(selected_pipeline, X_train, y_train)
+    final_result = final_evaluate(final_pipeline, X_test, y_test, threshold=selected_threshold)
+    print("Final held-out test metrics:", {k: round(v, 4) for k, v in final_result["metrics"].items()})
+
+    saved_path = save_final_model(
+        pipeline=final_pipeline,
+        model_path=MODEL_PATH,
+        model_name=selected_name,
+        threshold=selected_threshold,
+        metrics=final_result["metrics"],
+        feature_columns=X.columns,
+    )
+    print(f"\nFinal model artifact saved to: {saved_path}")
