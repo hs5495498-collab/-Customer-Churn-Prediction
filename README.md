@@ -48,13 +48,15 @@ Customer-Churn-Prediction/
 │   └── validation.py
 ├── models/                 # Saved model artifacts (not committed, see below)
 ├── app/
-│   └── app.py
+│   ├── app.py
+│   └── utils.py
 ├── reports/
 │   └── figures/            # Saved chart PNGs
 ├── tests/
 │   ├── test_preprocess.py
 │   ├── test_train.py
-│   └── test_validation.py
+│   ├── test_validation.py
+│   └── test_app.py
 ├── README.md
 ├── requirements.txt
 └── .gitignore
@@ -89,9 +91,23 @@ This fits the preprocessing pipeline and baseline Logistic Regression model (`cl
 
 ## Running the Streamlit App
 
-```powershell
-streamlit run app/app.py
-```
+The app loads the Stage 5 final model artifact — it does **not** train anything itself.
+
+1. Activate the virtual environment:
+   ```powershell
+   .venv\Scripts\activate
+   ```
+2. Install dependencies (if not already done):
+   ```powershell
+   pip install -r requirements.txt
+   ```
+3. Verify the model artifact exists at `models/final_churn_model.joblib`. If it's missing, run the notebook's Stage 5 section (`notebooks/churn_analysis.ipynb`) first to generate it — the app will show a clear error and refuse to start a prediction session if the file isn't found, rather than silently training a replacement model.
+4. Run the app from the **project root**:
+   ```powershell
+   streamlit run app/app.py
+   ```
+
+The app lets you enter a hypothetical customer's details (tenure, charges, contract, services, etc. — never gender or customer ID) and shows the predicted churn probability, a High Risk/Low Risk label using the Stage 5-selected threshold (0.60, not the default 0.50), and simple rule-based retention suggestions. It also displays the real Stage 5 cross-validation and held-out test metrics in the sidebar.
 
 ## Model Validation Methodology
 
