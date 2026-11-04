@@ -283,6 +283,14 @@ def test_streamlit_app_runs_without_exceptions():
     at = streamlit_testing.AppTest.from_file(APP_PATH)
     at.run(timeout=30)
     assert len(at.exception) == 0
+
+    # The app lands on the Overview dashboard by default; navigate to the
+    # Predict Churn page (sidebar navigation) to reach the customer form.
+    nav = at.sidebar.radio[0]
+    nav.set_value(next(o for o in nav.options if "Predict Churn" in o))
+    at.run(timeout=30)
+
+    assert len(at.exception) == 0
     assert len(at.selectbox) == 15
     assert len(at.slider) == 1
 
@@ -291,6 +299,10 @@ def test_streamlit_app_runs_without_exceptions():
 def test_streamlit_app_full_form_submission_produces_prediction():
     streamlit_testing = pytest.importorskip("streamlit.testing.v1")
     at = streamlit_testing.AppTest.from_file(APP_PATH)
+    at.run(timeout=30)
+
+    nav = at.sidebar.radio[0]
+    nav.set_value(next(o for o in nav.options if "Predict Churn" in o))
     at.run(timeout=30)
 
     at.slider[0].set_value(5)
@@ -304,3 +316,73 @@ def test_streamlit_app_full_form_submission_produces_prediction():
     assert len(at.exception) == 0
     assert any("risk-badge" in el.value for el in at.markdown)
     assert any(m.label == "Predicted Churn Probability" for m in at.metric)
+
+
+# ---------------------------------------------------------------------
+# Multi-page navigation (Overview, Customer Insights, Model Performance,
+# About Project) -- each page must render without exceptions and the app
+# must land on the Overview dashboard by default.
+# ---------------------------------------------------------------------
+
+@pytest.mark.skipif(not os.path.exists(MODEL_PATH), reason="Stage 5 model artifact not present locally")
+def test_app_lands_on_overview_page_by_default():
+    streamlit_testing = pytest.importorskip("streamlit.testing.v1")
+    at = streamlit_testing.AppTest.from_file(APP_PATH)
+    at.run(timeout=30)
+
+    assert len(at.exception) == 0
+    nav = at.sidebar.radio[0]
+    assert "Overview" in nav.value
+    assert any("Project Overview" in el.value for el in at.markdown)
+
+
+@pytest.mark.skipif(not os.path.exists(MODEL_PATH), reason="Stage 5 model artifact not present locally")
+@pytest.mark.parametrize("page_keyword", ["Customer Insights", "Model Performance", "About Project"])
+def test_each_navigation_page_renders_without_exceptions(page_keyword):
+    streamlit_testing = pytest.importorskip("streamlit.testing.v1")
+    at = streamlit_testing.AppTest.from_file(APP_PATH)
+    at.run(timeout=30)
+
+    nav = at.sidebar.radio[0]
+    nav.set_value(next(o for o in nav.options if page_keyword in o))
+    at.run(timeout=30)
+
+    assert len(at.exception) == 0
+
+
+@pytest.mark.skipif(not os.path.exists(MODEL_PATH), reason="Stage 5 model artifact not present locally")
+def test_model_performance_page_shows_real_test_metrics():
+    streamlit_testing = pytest.importorskip("streamlit.testing.v1")
+    at = streamlit_testing.AppTest.from_file(APP_PATH)
+    at.run(timeout=30)
+
+    nav = at.sidebar.radio[0]
+    nav.set_value(next(o for o in nav.options if "Model Performance" in o))
+    at.run(timeout=30)
+
+    assert len(at.exception) == 0
+    assert any("0.7622" in el.value for el in at.markdown)  # documented Stage 5 test accuracy
+    assert any("0.8409" in el.value for el in at.markdown)  # documented Stage 5 test ROC-AUC
+
+
+@pytest.mark.skipif(not os.path.exists(MODEL_PATH), reason="Stage 5 model artifact not present locally")
+def test_reset_button_clears_prediction_result():
+    streamlit_testing = pytest.importorskip("streamlit.testing.v1")
+    at = streamlit_testing.AppTest.from_file(APP_PATH)
+    at.run(timeout=30)
+
+    nav = at.sidebar.radio[0]
+    nav.set_value(next(o for o in nav.options if "Predict Churn" in o))
+    at.run(timeout=30)
+
+    submit_button = [b for b in at.button if b.label == "Predict Churn Risk"][0]
+    submit_button.click()
+    at.run(timeout=30)
+    assert any(m.label == "Predicted Churn Probability" for m in at.metric)
+
+    reset_button = [b for b in at.button if "Reset Form" in b.label][0]
+    reset_button.click()
+    at.run(timeout=30)
+
+    assert len(at.exception) == 0
+    assert not any(m.label == "Predicted Churn Probability" for m in at.metric)
